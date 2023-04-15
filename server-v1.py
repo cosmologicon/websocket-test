@@ -19,15 +19,8 @@ PORT = 1234
 EXPECTED = "Hello Server!"
 RESPONSE = "Hello Client!"
 
-# Produces the Sec-WebSocket-Accept string for the Server handshake response.
-# https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#server_handshake_response
-# key: the Sec-Websocket-Key provided by the client.
-def get_accept(key: str) -> str:
-	SALT = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	skey = key.encode("utf-8") + SALT
-	digest = hashlib.sha1(skey).digest()
-	return base64.b64encode(digest).decode("utf-8")
-assert get_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+
 
 # Extract the n bits from the given byte starting at a0 and interpret as a binary number.
 def bits(b, a0, n):
@@ -58,39 +51,50 @@ def joinbits(*ans):
 	return r
 assert joinbits((0, 2), (10, 4), (2, 2)) == 42
 
-# https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#format
-def extract_frame(rfile):
-	b0 = pullbytes(rfile, 2)
-	FIN, RSV, opcode, MASK, payload_len = splitbits(b0, 1, 3, 4, 1, 7)
-	# Not supported in this version:
-	# FIN = 0 and opcode = 0: message fragmentation.
-	# RSV > 0: extensions.
-	# opcode = 2: binary data.
-	# opcode = 9, 10: ping/pong.
-	assert (FIN, RSV, opcode, MASK) == (1, 0, 1, 1)
-	if payload_len == 126:
-		payload_len = pullbytes(rfile, 2)
-	elif payload_len == 127:
-		payload_len = pullbytes(rfile, 8)
-	print("extract_frame fields", FIN, RSV, opcode, MASK, payload_len)
-	mask_key = [pullbytes(rfile, 1) for _ in range(4)]
-	# Future improvement:
-	# https://stackoverflow.com/questions/46540337/python-xoring-each-byte-in-bytes-in-the-most-efficient-way
-	ENCODED = [pullbytes(rfile, 1) for _ in range(payload_len)]
-	return "".join(chr(char ^ mask_key[j % 4]) for j, char in enumerate(ENCODED))
-
-def encode_frame(text: str) -> bytes:
-	frame = []
-	FIN, RSV, opcode, MASK, payload_len = 1, 0, 1, 0, len(text)
-	assert payload_len < 126
-	frame.append(joinbits((FIN, 1), (RSV, 3), (opcode, 4)).to_bytes(1, "big"))
-	frame.append(joinbits((MASK, 1), (payload_len, 7)).to_bytes(1, "big"))
-	frame.append(text.encode("utf-8"))
-	return b"".join(frame)
 
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
+class WebSocketHandler(http.server.BaseHTTPRequestHandler):
+	SALT = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	# Produces the Sec-WebSocket-Accept string for the Server handshake response.
+	# https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#server_handshake_response
+	# key: the Sec-Websocket-Key provided by the client.
+	def get_accept(self, key: str) -> str:
+		digest = hashlib.sha1(key.encode("utf-8") + self.SALT).digest()
+		return base64.b64encode(digest).decode("utf-8")
+
+	# https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#format
+	def extract_frame(self, rfile):
+		b0 = pullbytes(rfile, 2)
+		FIN, RSV, opcode, MASK, payload_len = splitbits(b0, 1, 3, 4, 1, 7)
+		# Not supported in this version:
+		# FIN = 0 and opcode = 0: message fragmentation.
+		# RSV > 0: extensions.
+		# opcode = 2: binary data.
+		# opcode = 9, 10: ping/pong.
+		assert (FIN, RSV, opcode, MASK) == (1, 0, 1, 1)
+		if payload_len == 126:
+			payload_len = pullbytes(rfile, 2)
+		elif payload_len == 127:
+			payload_len = pullbytes(rfile, 8)
+		print("extract_frame fields", FIN, RSV, opcode, MASK, payload_len)
+		mask_key = [pullbytes(rfile, 1) for _ in range(4)]
+		# Future improvement:
+		# https://stackoverflow.com/questions/46540337/python-xoring-each-byte-in-bytes-in-the-most-efficient-way
+		ENCODED = [pullbytes(rfile, 1) for _ in range(payload_len)]
+		return "".join(chr(char ^ mask_key[j % 4]) for j, char in enumerate(ENCODED))
+
+	def encode_frame(self, text: str) -> bytes:
+		frame = []
+		FIN, RSV, opcode, MASK, payload_len = 1, 0, 1, 0, len(text)
+		assert payload_len < 126
+		frame.append(joinbits((FIN, 1), (RSV, 3), (opcode, 4)).to_bytes(1, "big"))
+		frame.append(joinbits((MASK, 1), (payload_len, 7)).to_bytes(1, "big"))
+		frame.append(text.encode("utf-8"))
+		return b"".join(frame)
+
+
+class MyHandler(WebSocketHandler):
 	def do_GET(self):
 		print("***** GET HANDLER *****")
 		print("client address:", self.client_address)
@@ -118,15 +122,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 		print("Handshake complete. Awaiting payload.")
 
 		print("***** PAYLOAD *****")
-		payload = extract_frame(self.rfile)
+		payload = self.extract_frame(self.rfile)
 		print("Paylod received:", payload)
 		assert payload == EXPECTED
 		print("Sending response:", RESPONSE)
-		self.wfile.write(encode_frame(RESPONSE))
+		self.wfile.write(self.encode_frame(RESPONSE))
 		httpd.shutdown()
 		
 
-with socketserver.TCPServer(("", PORT), Handler) as httpd:
+with socketserver.TCPServer(("", PORT), WebSocketHandler) as httpd:
 	print("serving at port", PORT)
 	httpd.serve_forever()
 

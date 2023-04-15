@@ -11,3 +11,13 @@ Deploy local server:
 	python3 server-v0.py
 
 Then open client-v0.html in a browser.
+
+# Version 1
+
+Adds the ability to communicate with multiple clients. Server runs locally.
+
+Deploy local server:
+
+	python3 server-v1.py
+
+Then open client-v1.html in multiple browser windows. Each one is a separate client.
