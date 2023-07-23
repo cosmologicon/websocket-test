@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<p><button id=connect onclick="connect()">Connect to server</button>
+<p><button id=disconnect onclick="disconnect()">Disconnect server</button>
+<p><button id=send0 disabled onclick="send('red')">Send message to server: red</button>
+<p><button id=send1 disabled onclick="send('green')">Send message to server: green</button>
+<p><button id=send2 disabled onclick="send('blue')">Send message to server: blue</button>
+<p><button id=send3 disabled onclick="send('CLOSE')">Send message to server: CLOSE</button>
+<p><textarea id=logbox readonly rows=20 cols=60></textarea>
+
+<script>
+"use strict"
+
+const logbox = document.getElementById("logbox")
+function log(text) {
+	logbox.value += text + "\n"
+}
+
+const sendbuttons = ["0", "1", "2", "3"].map(message => document.getElementById("send" + message))
+function enablebuttons(connected) {
+	sendbuttons.forEach(button => button.disabled = !connected)
+	document.getElementById("connect").disabled = connected
+	document.getElementById("disconnect").disabled = !connected
+}
+enablebuttons(false)
+
+
+// https://developer.mozilla.org/en-US/docs/Web/API/WebSocket
+
+let socket = null
+
+function send(message) {
+	socket.send(message)
+}
+function connect() {
+	log("connecting")
+	socket = new WebSocket("ws://localhost:1234")
+	socket.addEventListener('open', (event) => {
+		log("socket open")
+		enablebuttons(true)
+	})
+	socket.addEventListener('close', (event) => {
+		log("Socket closed by server.")
+		enablebuttons(false)
+	})
+	socket.addEventListener('message', (event) => {
+		log('Message from server: ' + event.data)
+	})
+	socket.addEventListener('error', (event) => {
+		log('WebSocket error: ' + event)
+	})
+}
+function disconnect() {
+	log("disconnecting")
+	socket.close()
+	socket = null
+}
+
+</script>

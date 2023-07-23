@@ -13,8 +13,8 @@ import socketserver
 import hashlib
 import base64
 
-# Must be > 1023 if running as unprivileged user.
 PORT = 1234
+assert PORT > 1023  # Required if running as unprivileged user.
 
 EXPECTED = "Hello Server!"
 RESPONSE = "Hello Client!"
@@ -66,6 +66,7 @@ def extract_frame(rfile):
 	# FIN = 0 and opcode = 0: message fragmentation.
 	# RSV > 0: extensions.
 	# opcode = 2: binary data.
+	# opcode = 8: close frame.
 	# opcode = 9, 10: ping/pong.
 	assert (FIN, RSV, opcode, MASK) == (1, 0, 1, 1)
 	if payload_len == 126:
