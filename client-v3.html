@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<p><button id=connect onclick="connect()">Connect to server</button>
+<p><button id=disconnect onclick="disconnect()">Disconnect server</button>
+<p><button id=send0 disabled onclick="send('red')">Send message to server: red</button>
+<p><button id=send1 disabled onclick="send('green')">Send message to server: green</button>
+<p><button id=send2 disabled onclick="send('blue')">Send message to server: blue</button>
+<p><button id=send3 disabled onclick="sendlen(100)">Send len-100 message to server</button>
+<p><button id=send4 disabled onclick="sendlen(1000)">Send len-1000 message to server</button>
+<p><button id=send5 disabled onclick="sendlen(10000)">Send len-10000 message to server</button>
+<p><button id=send6 disabled onclick="sendlen(100000)">Send len-100000 message to server</button>
+<p><button id=send7 disabled onclick="sendlen(1000000)">Send len-1000000 message to server</button>
+<p><button id=send8 disabled onclick="sendbinary()">Send binary message to server</button>
+<p><button id=send9 disabled onclick="send('CLOSE')">Send message to server: CLOSE</button>
+<p><textarea id=logbox readonly rows=20 cols=80></textarea>
+
+<script>
+"use strict"
+
+const logbox = document.getElementById("logbox")
+function log(text) {
+	logbox.value += text + "\n"
+}
+
+const sendbuttons = Array.from(document.getElementsByTagName("button"))
+	.filter(button => button.id.slice(0, 4) == "send")
+function enablebuttons(connected) {
+	sendbuttons.forEach(button => button.disabled = !connected)
+	document.getElementById("connect").disabled = connected
+	document.getElementById("disconnect").disabled = !connected
+}
+enablebuttons(false)
+
+
+// https://developer.mozilla.org/en-US/docs/Web/API/WebSocket
+
+let socket = null
+
+function send(message) {
+	socket.send(message)
+}
+function sendlen(len) {
+	let message = Array.from({length: len}, (_, i) => String.fromCharCode(i % 26 + 97)).join("")
+	socket.send(message)
+}
+function sendbinary() {
+	let blob = new Blob([JSON.stringify({a: 1}, null, 2)], {
+		type: "application/json",
+	});
+	send(blob)
+}
+
+function trunc(string, max_len) {
+	return string.length <= max_len ? string : string.slice(0, max_len - 6) + `... [${string.length}]`
+}
+
+function connect() {
+	log("connecting")
+	socket = new WebSocket("ws://localhost:23400")
+	socket.addEventListener('open', (event) => {
+		log("socket open")
+		enablebuttons(true)
+	})
+	socket.addEventListener('close', (event) => {
+		log("Socket closed by server.")
+		enablebuttons(false)
+	})
+	socket.addEventListener('message', (event) => {
+		log('Message from server: ' + trunc(event.data, 50))
+	})
+	socket.addEventListener('error', (event) => {
+		log('WebSocket error: ' + event)
+	})
+}
+function disconnect() {
+	log("disconnecting")
+	socket.close()
+	socket = null
+}
+
+</script>

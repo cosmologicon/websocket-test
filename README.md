@@ -34,3 +34,13 @@ Deploy local server:
 
 Then open client-v1.html in a browser. You can open multiple clients in different browser windows,
 which the server can operate with simultaneously.
+
+# Version 3
+
+Adds the ability to handle message fragmentation, as well as binary data.
+
+Deploy local server:
+
+	python3 server-v3.py
+
+Then open client-v3.html in a browser. 
