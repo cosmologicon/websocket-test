@@ -2,7 +2,7 @@
 # https://docs.python.org/3/library/http.server.html
 
 # This server serves HTTP on port 1234. When it receives a WebSocket request, it completes
-# the handshake and then blocks until it receives a payload. When the server receives a message
+# the handshake and then asynchronously awaits a payload. When the server receives a message
 # frame, it responds with a message identifying the client and repeating the message back.
 # If it receives the special message "CLOSE", or after receiving five messages from the same
 # client, or if it receives a close frame, then the server sends a close frame and closes the
@@ -15,23 +15,14 @@ import socketserver
 import asyncio
 import hashlib
 import base64
+from itertools import count
 from io import BytesIO
 
 PORT = 1234
 assert PORT > 1023  # Required if running as unprivileged user.
 
 
-# Extract the n bits from the given byte starting at a0 and interpret as a binary number.
-def bits(b, a0, n):
-	return (b >> (8 - a0 - n)) & ((1 << n) - 1)
-assert bits(42, 2, 4) == 10
-
-def pullbytes(rfile, n):
-	r = 0
-	for b in rfile.read(n):
-		r <<= 8
-		r += b
-	return r
+### WEBSOCKET UTILITY FUNCTIONS ###
 
 # Treats the number b as binary and splits it into separate binary numbers, each of which
 # is n bits long, specified by ns.
@@ -49,18 +40,6 @@ def joinbits(*ans):
 		r += a
 	return r
 assert joinbits((0, 2), (10, 4), (2, 2)) == 42
-
-
-
-class ClientTracker:
-	def __init__(self):
-		self.nclient = 0
-	def get_client_id(self):
-		client_id = self.nclient
-		self.nclient += 1
-		return client_id
-client_tracker = ClientTracker()
-
 
 # Produces the Sec-WebSocket-Accept string for the Server handshake response.
 # https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#server_handshake_response
@@ -92,8 +71,8 @@ async def extract_frame(stream_reader):
 	mask_key = [await read_int(stream_reader, 1) for _ in range(4)]
 	# Future improvement:
 	# https://stackoverflow.com/questions/46540337/python-xoring-each-byte-in-bytes-in-the-most-efficient-way
-	ENCODED = [await read_int(stream_reader, 1) for _ in range(payload_len)]
-	payload = "".join(chr(char ^ mask_key[j % 4]) for j, char in enumerate(ENCODED))
+	encoded = [await read_int(stream_reader, 1) for _ in range(payload_len)]
+	payload = "".join(chr(char ^ mask_key[j % 4]) for j, char in enumerate(encoded))
 	return is_close, payload
 
 def encode_frame(text: str, opcode: int = 1) -> bytes:
@@ -106,7 +85,11 @@ def encode_frame(text: str, opcode: int = 1) -> bytes:
 	frame.append(text.encode("utf-8"))
 	return b"".join(frame)
 
-# We don't actually use the BaseHTTPRequestHandler class for anything except to parse the headers.
+
+### SERVER AND HANDLER CODE ###
+
+# We only use the BaseHTTPRequestHandler class for parsing the HTTP headers.
+# https://stackoverflow.com/questions/4685217/parse-raw-http-headers
 class HTTPRequestParser(http.server.BaseHTTPRequestHandler):
 	def __init__(self, request_text):
 		self.rfile = BytesIO(request_text)
@@ -116,7 +99,6 @@ class HTTPRequestParser(http.server.BaseHTTPRequestHandler):
 		self.parse_request()
 
 	def dump_info(self):
-		print("***** GET HANDLER *****")
 		print("command:", self.command)
 		print("path:", self.path)
 		print("request_version:", self.request_version)
@@ -130,15 +112,20 @@ class HTTPRequestParser(http.server.BaseHTTPRequestHandler):
 		self.error_message = message
 
 
+# Main asynchronous WebSocket handler. Is created for each initial request. If the handshake
+# succeeds, it remains open until either it receives a close frame, or self.running is set to
+# False.
 class Handler:
+	client_counter = count()
+
 	def __init__(self, stream_reader, stream_writer):
 		self.reader = stream_reader
 		self.writer = stream_writer
-		self.client_id = client_tracker.get_client_id()
+		self.client_id = next(self.client_counter)
 		self.nmessage = 0
 		self.running = True
 
-	async def send(self, message):
+	async def send(self, message: bytes):
 		self.writer.write(message)
 		await self.writer.drain()
 
@@ -176,7 +163,6 @@ class Handler:
 			("Sec-WebSocket-Accept", accept),
 		]
 		await self.send_http(101, "Switching Protocols", headers)
-		print("Handshake complete. Awaiting payload.")
 
 	async def run(self):
 		while self.running:
@@ -185,6 +171,7 @@ class Handler:
 			print("Is close:", is_close)
 			print("Payload:", payload)
 			if is_close:
+				self.running = False
 				break
 			ret = await self.handle(payload)
 			if ret is False:
@@ -202,13 +189,12 @@ class Handler:
 async def handle(stream_reader, stream_writer):
 	handler = Handler(stream_reader, stream_writer)
 	await handler.handshake()
+	print("Handshake complete. Awaiting payload.")
 	await handler.run()
 	await handler.close()
 
 
-server = None
 async def run_server():
-	global server
 	server = await asyncio.start_server(handle, host="", port=PORT)
 	async with server:
 		await server.serve_forever()
