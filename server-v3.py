@@ -207,8 +207,9 @@ class Handler:
 		request_text = await self.reader.readuntil(b"\r\n\r\n")
 		self.request = HTTPRequestParser(request_text)
 		if "Sec-WebSocket-Version" not in self.request.headers:
-			await send_http(stream_writer, 400, "Bad Request")
+			await send_http(self.writer, 400, "Bad Request")
 			await self.close_writer()
+			return
 		accept = get_accept(self.request.headers["Sec-WebSocket-Key"])
 		headers = [
 			("Upgrade", "websocket"),

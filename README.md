@@ -37,10 +37,14 @@ which the server can operate with simultaneously.
 
 # Version 3
 
-Adds the ability to handle message fragmentation, as well as binary data.
+Adds the ability to handle messages longer than 126 characters and message fragmentation, as well
+as binary data.
 
 Deploy local server:
 
 	python3 server-v3.py
 
-Then open client-v3.html in a browser. 
+Then open client-v3.html in a browser. As with v2, you can open multiple clients simultaneously.
+The client has options to send long text of a specified length. Longer messages may be fragmented
+depending on the browser (Chrome seems to fragment above 131,000 characters, but Firefox sends
+1,000,000 characters without fragmentation.)
